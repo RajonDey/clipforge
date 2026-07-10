@@ -18,5 +18,8 @@
     "#FBBF24",
     "#C084FC",
     "#4ADE80"
-  ]
+  ],
+  "aspect": "16:9",
+  "hold_seconds": 0.4,
+  "speed": 2.0
 }

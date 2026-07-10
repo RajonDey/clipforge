@@ -1,8 +1,8 @@
 """
 Theme presets and persistence for section renders.
 
-Edit theme.json (or use the UI) to change colors, fonts, and sizes
-across every built-in section type.
+Edit theme.json (or use the UI) to change colors, fonts, sizes,
+aspect ratio, and timing across every built-in section type.
 """
 
 from __future__ import annotations
@@ -29,6 +29,10 @@ DEFAULT_THEME: dict = {
     "body_size": 28,
     "label_size": 24,
     "bar_colors": ["#5EEAD4", "#60A5FA", "#FBBF24", "#C084FC", "#4ADE80"],
+    # Production controls
+    "aspect": "16:9",          # "16:9" | "9:16"
+    "hold_seconds": 1.2,       # pause on final frame before fade-out
+    "speed": 1.0,              # 1.0 = normal; higher = faster animations
 }
 
 PRESETS: dict[str, dict] = {
@@ -89,7 +93,12 @@ EDITABLE_KEYS = (
     "body_size",
     "label_size",
     "bar_colors",
+    "aspect",
+    "hold_seconds",
+    "speed",
 )
+
+PRODUCTION_KEYS = ("aspect", "hold_seconds", "speed")
 
 
 def _normalize(data: dict) -> dict:
@@ -104,6 +113,22 @@ def _normalize(data: dict) -> dict:
     if not isinstance(theme.get("bar_colors"), list) or not theme["bar_colors"]:
         theme["bar_colors"] = list(DEFAULT_THEME["bar_colors"])
     theme["font"] = str(theme.get("font") or "").strip()
+
+    aspect = str(theme.get("aspect") or "16:9").strip()
+    theme["aspect"] = aspect if aspect in ("16:9", "9:16") else "16:9"
+
+    try:
+        hold = float(theme.get("hold_seconds", 1.2))
+    except (TypeError, ValueError):
+        hold = 1.2
+    theme["hold_seconds"] = round(max(0.3, min(8.0, hold)), 2)
+
+    try:
+        speed = float(theme.get("speed", 1.0))
+    except (TypeError, ValueError):
+        speed = 1.0
+    theme["speed"] = round(max(0.5, min(2.5, speed)), 2)
+
     return theme
 
 
@@ -132,7 +157,12 @@ def save_theme(theme: dict) -> dict:
 def apply_preset(name: str) -> dict:
     if name not in PRESETS:
         raise ValueError(f"Unknown preset '{name}'. Available: {', '.join(PRESETS)}")
-    return save_theme(PRESETS[name])
+    current = load_theme()
+    preset = deepcopy(PRESETS[name])
+    # Keep production controls when switching color presets
+    for key in PRODUCTION_KEYS:
+        preset[key] = current.get(key, preset[key])
+    return save_theme(preset)
 
 
 def merge_theme(base: dict | None = None, overrides: dict | None = None) -> dict:
@@ -155,3 +185,7 @@ def text_kwargs(theme: dict, size_key: str = "body_size", color_key: str = "text
     if font:
         parts.append(f'font="{font}"')
     return ", ".join(parts)
+
+
+def is_portrait(theme: dict) -> bool:
+    return theme.get("aspect") == "9:16"

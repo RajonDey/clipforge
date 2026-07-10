@@ -119,7 +119,7 @@
       margin-bottom: 1rem;
     }
 
-    .type-btn, .ghost, .render, .save-theme {
+    .type-btn, .ghost, .render, .save-theme, .add-seq {
       appearance: none;
       font: inherit;
       cursor: pointer;
@@ -147,7 +147,7 @@
       color: white;
     }
 
-    .type-btn:active, .render:active, .ghost:active, .save-theme:active {
+    .type-btn:active, .render:active, .ghost:active, .save-theme:active, .add-seq:active {
       transform: scale(0.98);
     }
 
@@ -191,7 +191,7 @@
 
     .field { flex: 1; min-width: 120px; }
 
-    .render, .save-theme {
+    .render, .save-theme, .add-seq {
       border: 0;
       background: var(--ink);
       color: white;
@@ -202,8 +202,83 @@
       white-space: nowrap;
     }
 
-    .render:hover, .save-theme:hover { background: var(--accent-deep); }
-    .render:disabled, .save-theme:disabled { opacity: 0.55; cursor: wait; }
+    .render:hover, .save-theme:hover, .add-seq:hover { background: var(--accent-deep); }
+    .render:disabled, .save-theme:disabled, .add-seq:disabled { opacity: 0.55; cursor: wait; }
+
+    .add-seq {
+      background: white;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      font-size: 0.92rem;
+      padding: 0.75rem 1rem;
+    }
+
+    .add-seq:hover { background: var(--paper-2); color: var(--ink); }
+
+    .actions-row {
+      display: flex;
+      gap: 0.55rem;
+      flex-wrap: wrap;
+      align-items: stretch;
+    }
+
+    .actions-row .render { flex: 1; min-width: 140px; }
+
+    .seq-list {
+      list-style: none;
+      margin: 0.6rem 0 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    .seq-list li {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0.55rem 0.65rem;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      font-size: 0.9rem;
+    }
+
+    .seq-list .seq-type {
+      font-weight: 700;
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--accent);
+      min-width: 4.2rem;
+    }
+
+    .seq-list .seq-body {
+      flex: 1;
+      color: var(--ink-soft);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .seq-list .seq-remove {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 1.1rem;
+      line-height: 1;
+      padding: 0.15rem 0.35rem;
+    }
+
+    .seq-list .seq-remove:hover { color: var(--danger); }
+
+    .stage.portrait {
+      aspect-ratio: 9 / 16;
+      max-height: 520px;
+      width: min(100%, 280px);
+      margin-inline: auto;
+    }
 
     .ghost {
       border: 1px solid var(--line);
@@ -224,7 +299,7 @@
       color: var(--ink-soft);
     }
 
-    .status.error { color: var(--danger); }
+    .status.error { color: var(--danger); white-space: pre-wrap; }
     .status.busy::before {
       content: "";
       display: inline-block;
@@ -424,7 +499,7 @@
   <div class="wrap">
     <header>
       <h1 class="brand">Clipforge<span>.</span></h1>
-      <p class="lede">Pick a clip type, tune the look, render. Exports are kept; Manim caches are cleared after each run.</p>
+      <p class="lede">Compose clips for YouTube or Shorts — aspect, timing, and multi-clip sequences included.</p>
     </header>
 
     <div class="workspace">
@@ -451,18 +526,54 @@
 
         <div class="row">
           <div class="field">
+            <label class="label" for="aspect">Aspect</label>
+            <select id="aspect">
+              <option value="16:9" {% if theme.aspect != '9:16' %}selected{% endif %}>16:9 · YouTube / course</option>
+              <option value="9:16" {% if theme.aspect == '9:16' %}selected{% endif %}>9:16 · Shorts / Reels</option>
+            </select>
+          </div>
+          <div class="field">
             <label class="label" for="quality">Quality</label>
             <select id="quality">
-              <option value="l" selected>Draft · 480p</option>
-              <option value="m">Good · 720p</option>
-              <option value="h">High · 1080p</option>
+              <option value="l" selected>Draft · low</option>
+              <option value="m">Good · mid</option>
+              <option value="h">High · 1080</option>
               <option value="k">Ultra · 4K</option>
             </select>
           </div>
-          <button type="button" class="render" id="render">Render clip</button>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label class="label" for="hold">Hold (sec)</label>
+            <input id="hold" type="number" min="0.3" max="8" step="0.1" value="{{ theme.hold_seconds | default(1.2) }}" />
+          </div>
+          <div class="field">
+            <label class="label" for="speed">Speed</label>
+            <input id="speed" type="number" min="0.5" max="2.5" step="0.1" value="{{ theme.speed | default(1.0) }}" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="actions-row" style="flex:1; width:100%">
+            <button type="button" class="render" id="render">Render clip</button>
+            <button type="button" class="add-seq" id="add-seq">Add to sequence</button>
+          </div>
         </div>
 
         <p class="status" id="status" role="status" aria-live="polite"></p>
+
+        <details class="theme" open>
+          <summary>Sequence</summary>
+          <p class="hint" style="margin-top:0.65rem">Queue clips, then render them as one MP4. Same aspect/quality for every clip.</p>
+          <ul class="seq-list" id="seq-list">
+            <li id="seq-empty"><span class="meta">No clips queued yet.</span></li>
+          </ul>
+          <div class="row" style="margin-top:0.75rem">
+            <button type="button" class="ghost" id="seq-clear">Clear</button>
+            <button type="button" class="render" id="seq-render" style="margin-left:auto">Render sequence</button>
+          </div>
+        </details>
 
         <details class="theme">
           <summary>Look &amp; theme</summary>
@@ -536,7 +647,7 @@
             <span>Preview</span>
             <a id="download" href="#" download>Download MP4</a>
           </div>
-          <div class="stage">
+          <div class="stage" id="stage">
             <p class="placeholder" id="empty">Your rendered clip will appear here.</p>
             <video id="player" controls playsinline></video>
           </div>
@@ -571,7 +682,14 @@
     const fieldLabel = document.getElementById("field-label");
     const content = document.getElementById("content");
     const quality = document.getElementById("quality");
+    const aspect = document.getElementById("aspect");
+    const hold = document.getElementById("hold");
+    const speed = document.getElementById("speed");
     const renderBtn = document.getElementById("render");
+    const addSeqBtn = document.getElementById("add-seq");
+    const seqList = document.getElementById("seq-list");
+    const seqRenderBtn = document.getElementById("seq-render");
+    const seqClearBtn = document.getElementById("seq-clear");
     const status = document.getElementById("status");
     const player = document.getElementById("player");
     const empty = document.getElementById("empty");
@@ -579,8 +697,10 @@
     const exportsList = document.getElementById("exports-list");
     const mediaMb = document.getElementById("media-mb");
     const themeStatus = document.getElementById("theme-status");
+    const stage = document.getElementById("stage");
 
     let currentType = types[0]?.dataset.type || "title";
+    let sequence = [];
 
     function selectType(btn) {
       types.forEach((b) => b.setAttribute("aria-pressed", "false"));
@@ -592,6 +712,12 @@
     }
 
     types.forEach((btn) => btn.addEventListener("click", () => selectType(btn)));
+
+    function syncStageAspect() {
+      stage.classList.toggle("portrait", aspect.value === "9:16");
+    }
+    aspect.addEventListener("change", syncStageAspect);
+    syncStageAspect();
 
     function readThemeFromForm() {
       return {
@@ -606,6 +732,9 @@
         title_size: Number(document.getElementById("title-size").value),
         heading_size: Number(document.getElementById("heading-size").value),
         body_size: Number(document.getElementById("body-size").value),
+        aspect: aspect.value,
+        hold_seconds: Number(hold.value),
+        speed: Number(speed.value),
       };
     }
 
@@ -622,12 +751,15 @@
       document.getElementById("title-size").value = theme.title_size;
       document.getElementById("heading-size").value = theme.heading_size;
       document.getElementById("body-size").value = theme.body_size;
+      if (theme.aspect) aspect.value = theme.aspect;
+      if (theme.hold_seconds != null) hold.value = theme.hold_seconds;
+      if (theme.speed != null) speed.value = theme.speed;
+      syncStageAspect();
     }
 
     async function saveTheme(usePreset = false) {
       const payload = readThemeFromForm();
       if (usePreset) {
-        // Load full preset colors from server
         const res = await fetch("/api/theme", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -698,6 +830,79 @@
       showVideo(a.dataset.play, a.textContent.trim());
     });
 
+    function paintSequence() {
+      if (!sequence.length) {
+        seqList.innerHTML = '<li id="seq-empty"><span class="meta">No clips queued yet.</span></li>';
+        return;
+      }
+      seqList.innerHTML = sequence.map((clip, i) => `
+        <li>
+          <span class="seq-type">${clip.type}</span>
+          <span class="seq-body" title="${clip.content.replace(/"/g, "&quot;")}">${clip.content}</span>
+          <button type="button" class="seq-remove" data-index="${i}" aria-label="Remove">×</button>
+        </li>
+      `).join("");
+    }
+
+    addSeqBtn.addEventListener("click", () => {
+      const payload = content.value.trim();
+      if (!payload) {
+        status.className = "status error";
+        status.textContent = "Add some content before queuing.";
+        content.focus();
+        return;
+      }
+      if (sequence.length >= 20) {
+        status.className = "status error";
+        status.textContent = "Sequence is limited to 20 clips.";
+        return;
+      }
+      sequence.push({ type: currentType, content: payload });
+      paintSequence();
+      status.className = "status";
+      status.textContent = `Queued ${sequence.length} clip${sequence.length === 1 ? "" : "s"}.`;
+    });
+
+    seqList.addEventListener("click", (e) => {
+      const btn = e.target.closest(".seq-remove");
+      if (!btn) return;
+      sequence.splice(Number(btn.dataset.index), 1);
+      paintSequence();
+    });
+
+    seqClearBtn.addEventListener("click", () => {
+      sequence = [];
+      paintSequence();
+      status.className = "status";
+      status.textContent = "Sequence cleared.";
+    });
+
+    function setBusy(busy, label) {
+      renderBtn.disabled = busy;
+      addSeqBtn.disabled = busy;
+      seqRenderBtn.disabled = busy;
+      if (busy) {
+        status.className = "status busy";
+        status.textContent = label || "Working…";
+      }
+    }
+
+    async function withTimer(label, work) {
+      const startedAt = Date.now();
+      const tick = () => {
+        const secs = Math.floor((Date.now() - startedAt) / 1000);
+        status.textContent = `${label} ${secs}s`;
+      };
+      setBusy(true, `${label} 0s`);
+      const timer = setInterval(tick, 1000);
+      try {
+        return await work();
+      } finally {
+        clearInterval(timer);
+        setBusy(false);
+      }
+    }
+
     async function renderClip() {
       const payload = content.value.trim();
       if (!payload) {
@@ -707,41 +912,79 @@
         return;
       }
 
-      renderBtn.disabled = true;
-      status.className = "status busy";
-      status.textContent = "Rendering… then exporting & cleaning caches.";
-
       try {
-        // Persist current theme colors before render
-        await saveTheme(false);
-
-        const res = await fetch("/api/render", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            type: currentType,
-            content: payload,
-            quality: quality.value,
-          }),
+        const data = await withTimer("Rendering…", async () => {
+          await saveTheme(false);
+          const res = await fetch("/api/render", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: currentType,
+              content: payload,
+              quality: quality.value,
+              theme: readThemeFromForm(),
+            }),
+          });
+          const body = await res.json();
+          if (!res.ok || !body.ok) throw new Error(body.error || "Render failed");
+          return body;
         });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || "Render failed");
 
         showVideo(data.video_url, data.export_name);
         renderExports(data.exports);
         mediaMb.textContent = data.media_mb;
 
         status.className = "status";
-        status.textContent = `Ready in ${data.seconds}s · saved ${data.export_name}`;
+        const matched =
+          data.requested_type === "prompt" && data.type
+            ? ` · matched “${data.type}”`
+            : "";
+        const aspectLabel = data.aspect ? ` · ${data.aspect}` : "";
+        status.textContent = `Ready in ${data.seconds}s${matched}${aspectLabel} · saved ${data.export_name}`;
       } catch (err) {
         status.className = "status error";
         status.textContent = err.message || String(err);
-      } finally {
-        renderBtn.disabled = false;
+      }
+    }
+
+    async function renderSequence() {
+      if (!sequence.length) {
+        status.className = "status error";
+        status.textContent = "Queue at least one clip first.";
+        return;
+      }
+
+      try {
+        const data = await withTimer(`Rendering sequence (${sequence.length})…`, async () => {
+          await saveTheme(false);
+          const res = await fetch("/api/sequence", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              clips: sequence,
+              quality: quality.value,
+              theme: readThemeFromForm(),
+            }),
+          });
+          const body = await res.json();
+          if (!res.ok || !body.ok) throw new Error(body.error || "Sequence failed");
+          return body;
+        });
+
+        showVideo(data.video_url, data.export_name);
+        renderExports(data.exports);
+        mediaMb.textContent = data.media_mb;
+
+        status.className = "status";
+        status.textContent = `Sequence ready in ${data.seconds}s · ${data.clips?.length || sequence.length} clips · ${data.export_name}`;
+      } catch (err) {
+        status.className = "status error";
+        status.textContent = err.message || String(err);
       }
     }
 
     renderBtn.addEventListener("click", renderClip);
+    seqRenderBtn.addEventListener("click", renderSequence);
     content.addEventListener("keydown", (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault();

@@ -16,7 +16,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, send_file
 
-from animate import QUALITY_DIRS, render_section
+from animate import QUALITY_DIRS, render_from_prompt, render_section, render_sequence
 from cleanup import EXPORTS_DIR, cleanup_media, list_exports, media_size_mb
 from sections import BUILDERS
 from theme import PRESETS, apply_preset, load_theme, save_theme
@@ -25,6 +25,12 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 app = Flask(__name__, template_folder=str(SCRIPT_DIR / "templates"))
 
 SECTION_META = {
+    "prompt": {
+        "label": "Prompt",
+        "hint": "Describe the clip in plain English — Clipforge picks a section type for you.",
+        "placeholder": "title Welcome to My Channel\nor: timeline 2020 to 2025\nor: Client -> API -> Database",
+        "field": "Prompt",
+    },
     "title": {
         "label": "Title",
         "hint": "A short title card with fade-in and underline.",
@@ -57,7 +63,7 @@ SECTION_META = {
     },
     "table": {
         "label": "Table",
-        "hint": "Simple animated table.",
+        "hint": "Simple animated table. Same columns every row: Item,Price; Apple,1.00",
         "placeholder": "Item,Price; Apple,1.00; Banana,2.00",
         "field": "Rows",
     },
@@ -68,10 +74,11 @@ _render_lock = threading.Lock()
 
 @app.get("/")
 def index():
+    type_order = ("prompt", "title", "timeline", "chart", "bullets", "diagram", "table")
     types = [
         {"id": key, **SECTION_META[key]}
-        for key in ("title", "timeline", "chart", "bullets", "diagram", "table")
-        if key in BUILDERS
+        for key in type_order
+        if key in SECTION_META and (key == "prompt" or key in BUILDERS)
     ]
     return render_template(
         "index.html",
@@ -114,7 +121,7 @@ def api_render():
     quality = (body.get("quality") or "l").strip()
     theme_overrides = body.get("theme") if isinstance(body.get("theme"), dict) else None
 
-    if section_type not in BUILDERS:
+    if section_type != "prompt" and section_type not in BUILDERS:
         return jsonify({"ok": False, "error": f"Unknown type '{section_type}'"}), 400
     if not payload:
         return jsonify({"ok": False, "error": "Add some content first."}), 400
@@ -133,7 +140,56 @@ def api_render():
     started = time.time()
     try:
         with _render_lock:
-            result = render_section(section_type, payload, quality=quality)
+            if section_type == "prompt":
+                result = render_from_prompt(payload, quality=quality)
+            else:
+                result = render_section(section_type, payload, quality=quality)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except (FileNotFoundError, RuntimeError) as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    resolved = result.get("resolved_type") or section_type
+    return jsonify(
+        {
+            "ok": True,
+            "type": resolved,
+            "requested_type": section_type,
+            "quality": quality,
+            "aspect": result.get("aspect", ""),
+            "seconds": round(time.time() - started, 1),
+            "video_url": f"/exports/{result['export_name']}",
+            "export_name": result["export_name"],
+            "media_mb": result["media_mb"],
+            "exports": list_exports(12),
+        }
+    )
+
+
+@app.post("/api/sequence")
+def api_sequence():
+    body = request.get_json(silent=True) or {}
+    clips = body.get("clips") or []
+    quality = (body.get("quality") or "l").strip()
+    theme_overrides = body.get("theme") if isinstance(body.get("theme"), dict) else None
+
+    if not isinstance(clips, list) or not clips:
+        return jsonify({"ok": False, "error": "Add at least one clip to the sequence."}), 400
+    if quality not in QUALITY_DIRS:
+        return jsonify({"ok": False, "error": f"Unknown quality '{quality}'"}), 400
+
+    if theme_overrides:
+        try:
+            current = load_theme()
+            current.update(theme_overrides)
+            save_theme(current)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Theme error: {e}"}), 400
+
+    started = time.time()
+    try:
+        with _render_lock:
+            result = render_sequence(clips, quality=quality)
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
     except (FileNotFoundError, RuntimeError) as e:
@@ -142,12 +198,14 @@ def api_render():
     return jsonify(
         {
             "ok": True,
-            "type": section_type,
+            "type": "sequence",
             "quality": quality,
+            "aspect": result.get("aspect", ""),
             "seconds": round(time.time() - started, 1),
             "video_url": f"/exports/{result['export_name']}",
             "export_name": result["export_name"],
             "media_mb": result["media_mb"],
+            "clips": result.get("clips", []),
             "exports": list_exports(12),
         }
     )

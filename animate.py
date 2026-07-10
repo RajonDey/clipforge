@@ -63,17 +63,36 @@ Requirements:
 """
 
 QUALITY_FLAGS = {
-    "l": "-pql",   # 480p15 preview
-    "m": "-pqm",   # 720p30
-    "h": "-pqh",   # 1080p60
-    "k": "-pqk",   # 2160p60
+    "l": "-pql",   # legacy flag (resolution now set explicitly)
+    "m": "-pqm",
+    "h": "-pqh",
+    "k": "-pqk",
 }
 
+# Kept for API validation; actual output folder is derived from pixel height + fps
 QUALITY_DIRS = {
     "l": "480p15",
     "m": "720p30",
     "h": "1080p60",
     "k": "2160p60",
+}
+
+FRAME_RATES = {"l": 15, "m": 30, "h": 60, "k": 60}
+
+# (width, height) per aspect × quality
+ASPECT_RESOLUTIONS: dict[str, dict[str, tuple[int, int]]] = {
+    "16:9": {
+        "l": (854, 480),
+        "m": (1280, 720),
+        "h": (1920, 1080),
+        "k": (3840, 2160),
+    },
+    "9:16": {
+        "l": (480, 854),
+        "m": (720, 1280),
+        "h": (1080, 1920),
+        "k": (2160, 3840),
+    },
 }
 
 
@@ -88,8 +107,23 @@ def build_from_type(
     return BUILDERS[section_type](payload, theme=theme)
 
 
-def video_path_for_quality(quality: str) -> Path:
-    folder = QUALITY_DIRS.get(quality, "480p15")
+def resolve_aspect(theme: dict | None = None) -> str:
+    aspect = (theme or load_theme()).get("aspect", "16:9")
+    return aspect if aspect in ASPECT_RESOLUTIONS else "16:9"
+
+
+def resolution_for(quality: str, aspect: str = "16:9") -> tuple[int, int, int]:
+    """Return (width, height, fps) for a quality + aspect pair."""
+    if quality not in FRAME_RATES:
+        raise ValueError(f"Unknown quality '{quality}'. Use: {', '.join(FRAME_RATES)}")
+    aspect = aspect if aspect in ASPECT_RESOLUTIONS else "16:9"
+    width, height = ASPECT_RESOLUTIONS[aspect][quality]
+    return width, height, FRAME_RATES[quality]
+
+
+def video_path_for_quality(quality: str, aspect: str = "16:9") -> Path:
+    _, height, fps = resolution_for(quality, aspect)
+    folder = f"{height}p{fps}"
     return SCRIPT_DIR / "media" / "videos" / "generated_scene" / folder / "GeneratedScene.mp4"
 
 
@@ -174,10 +208,17 @@ def resolve_manim() -> str:
     return "manim"
 
 
-def save_and_render(code: str, quality: str, preview: bool) -> Path:
-    """Write scene, render with Manim, return path to the MP4."""
-    if quality not in QUALITY_FLAGS:
-        raise ValueError(f"Unknown quality '{quality}'. Use: {', '.join(QUALITY_FLAGS)}")
+def save_and_render(
+    code: str,
+    quality: str,
+    preview: bool,
+    aspect: str = "16:9",
+) -> Path:
+    """Write scene, render with Manim at the given aspect/quality, return MP4 path."""
+    if quality not in FRAME_RATES:
+        raise ValueError(f"Unknown quality '{quality}'. Use: {', '.join(FRAME_RATES)}")
+
+    width, height, fps = resolution_for(quality, aspect)
 
     # Clear stale Manim caches before each run
     cleanup_media()
@@ -186,32 +227,75 @@ def save_and_render(code: str, quality: str, preview: bool) -> Path:
     print(f"Saved scene to {OUTPUT_SCENE}")
 
     manim_bin = resolve_manim()
-    flag = QUALITY_FLAGS[quality]
-    if not preview:
-        flag = flag.replace("-p", "-")  # drop preview flag → -ql / -qm / ...
-
-    cmd = [manim_bin, flag, str(OUTPUT_SCENE)]
-    print(f"Rendering with {' '.join(cmd)} ...")
+    # Explicit resolution + fps so 9:16 and 16:9 both work (quality presets are 16:9-only)
+    cmd = [
+        manim_bin,
+        "--format", "mp4",
+        "-r", f"{width},{height}",
+        "--fps", str(fps),
+        str(OUTPUT_SCENE),
+    ]
+    if preview:
+        cmd.insert(1, "-p")
+    print(f"Rendering {aspect} {width}x{height}@{fps} …")
+    print(f"  {' '.join(cmd)}")
 
     try:
-        result = subprocess.run(cmd, cwd=str(SCRIPT_DIR), check=False)
+        result = subprocess.run(
+            cmd,
+            cwd=str(SCRIPT_DIR),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
     except FileNotFoundError as e:
         raise FileNotFoundError(
             "`manim` not found. Install with: .venv/bin/pip install manim"
         ) from e
 
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"Manim exited with code {result.returncode}. "
-            "Check generated_scene.py for issues."
-        )
+    # Keep terminal feedback while still capturing for the API
+    if result.stdout:
+        print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
+    if result.stderr:
+        print(result.stderr, end="" if result.stderr.endswith("\n") else "\n", file=sys.stderr)
 
-    out = video_path_for_quality(quality)
+    if result.returncode != 0:
+        detail = _summarize_manim_error(result.stderr or result.stdout or "")
+        raise RuntimeError(detail)
+
+    out = video_path_for_quality(quality, aspect)
     if not out.is_file():
-        raise RuntimeError(f"Render finished but video not found at {out}")
+        # Manim sometimes names folders differently — search for the newest mp4
+        found = _find_latest_mp4()
+        if found:
+            out = found
+        else:
+            raise RuntimeError(f"Render finished but video not found at {out}")
 
     print(f"Done. Video: {out}")
     return out
+
+
+def _find_latest_mp4() -> Path | None:
+    root = SCRIPT_DIR / "media" / "videos" / "generated_scene"
+    if not root.is_dir():
+        return None
+    candidates = sorted(root.rglob("GeneratedScene.mp4"), key=lambda p: p.stat().st_mtime)
+    return candidates[-1] if candidates else None
+
+
+def _summarize_manim_error(log: str) -> str:
+    """Pull the useful exception line out of a Manim traceback."""
+    lines = [ln.strip() for ln in log.splitlines() if ln.strip()]
+    for marker in ("ValueError:", "TypeError:", "AttributeError:", "NameError:", "RuntimeError:"):
+        for ln in reversed(lines):
+            if marker in ln:
+                msg = ln.split(marker, 1)[-1].strip()
+                return f"Render failed: {msg}"
+    # Fall back to last non-empty line
+    if lines:
+        return f"Render failed: {lines[-1][:240]}"
+    return "Manim render failed. Check the terminal for details."
 
 
 def render_section(
@@ -228,8 +312,9 @@ def render_section(
     Returns dict with export path (durable) and cleanup info.
     """
     theme = merge_theme(load_theme(), theme_overrides)
+    aspect = resolve_aspect(theme)
     code = build_from_type(section_type, payload, theme=theme)
-    rendered = save_and_render(code, quality=quality, preview=False)
+    rendered = save_and_render(code, quality=quality, preview=False, aspect=aspect)
     exported = export_video(rendered, section_type, payload)
     print(f"Exported: {exported}")
 
@@ -244,6 +329,102 @@ def render_section(
         "cleaned": cleaned,
         "media_mb": media_size_mb(),
         "theme_preset": theme.get("preset", ""),
+        "resolved_type": section_type,
+        "aspect": aspect,
+    }
+
+
+def render_from_prompt(
+    prompt: str,
+    quality: str = "l",
+    theme_overrides: dict | None = None,
+) -> dict:
+    """
+    Auto-route a freeform prompt to a built-in section builder.
+    Raises ValueError with guidance when nothing matches.
+    """
+    text = prompt.strip()
+    if not text:
+        raise ValueError("Add a prompt first.")
+
+    detected = detect_section(text)
+    if not detected:
+        raise ValueError(
+            "Couldn't match that prompt to a clip type. Try one of:\n"
+            '• title Welcome to My Channel\n'
+            "• timeline 2020:Launch, 2022:Growth, 2025:Today\n"
+            "• chart A:100, B:200, C:150\n"
+            "• bullets Point one; Point two; Point three\n"
+            "• Client -> API -> Database\n"
+            "• table Item,Price; Apple,1.00; Banana,2.00"
+        )
+    section_type, payload = detected
+    result = render_section(section_type, payload, quality=quality, theme_overrides=theme_overrides)
+    result["resolved_type"] = section_type
+    result["resolved_payload"] = payload
+    return result
+
+
+def render_sequence(
+    clips: list[dict],
+    quality: str = "l",
+    theme_overrides: dict | None = None,
+) -> dict:
+    """
+    Render multiple section clips in order, then concat into one MP4.
+
+    Each clip dict: {"type": "title"|"prompt"|..., "content": "..."}.
+    """
+    from cleanup import concat_videos
+
+    if not clips:
+        raise ValueError("Sequence is empty — add at least one clip.")
+    if len(clips) > 20:
+        raise ValueError("Sequence is limited to 20 clips.")
+
+    theme = merge_theme(load_theme(), theme_overrides)
+    aspect = resolve_aspect(theme)
+    parts: list[Path] = []
+    resolved: list[dict] = []
+
+    for i, clip in enumerate(clips, start=1):
+        section_type = (clip.get("type") or "").strip()
+        payload = (clip.get("content") or "").strip()
+        if not payload:
+            raise ValueError(f"Clip {i} has no content.")
+
+        print(f"\n—— Sequence clip {i}/{len(clips)} ({section_type}) ——")
+        if section_type == "prompt":
+            result = render_from_prompt(payload, quality=quality, theme_overrides=theme)
+        elif section_type in BUILDERS:
+            result = render_section(
+                section_type,
+                payload,
+                quality=quality,
+                theme_overrides=theme,
+                clean_after=True,
+            )
+        else:
+            raise ValueError(f"Clip {i}: unknown type '{section_type}'")
+
+        parts.append(Path(result["export"]))
+        resolved.append(
+            {
+                "type": result.get("resolved_type", section_type),
+                "export_name": result["export_name"],
+            }
+        )
+
+    sequence_path = concat_videos(parts, slug=f"sequence-{len(parts)}clips")
+    print(f"Sequence exported: {sequence_path}")
+
+    return {
+        "export": sequence_path,
+        "export_name": sequence_path.name,
+        "media_mb": media_size_mb(),
+        "aspect": aspect,
+        "clips": resolved,
+        "resolved_type": "sequence",
     }
 
 
@@ -368,7 +549,9 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     try:
-        out = save_and_render(code, quality=args.quality, preview=False)
+        theme = load_theme()
+        aspect = resolve_aspect(theme)
+        out = save_and_render(code, quality=args.quality, preview=False, aspect=aspect)
         label = source.split(":", 1)[-1] if source.startswith("builder:") else "clip"
         payload = args.text or args.data or args.description or "clip"
         exported = export_video(out, label, payload)

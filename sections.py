@@ -2,7 +2,7 @@
 Deterministic Manim section builders for video-section workflows.
 
 Each builder returns a complete, runnable Manim script string.
-Colors, fonts, and sizes come from theme.json (see theme.py).
+Colors, fonts, sizes, aspect ratio, and timing come from theme.json.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import ast
 import re
 from typing import Callable
 
-from theme import load_theme, merge_theme, text_kwargs
+from theme import is_portrait, load_theme, merge_theme, text_kwargs
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +59,9 @@ def parse_table(raw: str) -> list[list[str]]:
     Parse table rows. Accepts:
       - Python list literal: [['Item','Price'],['Apple','$1']]
       - Semicolon rows with commas: Item,Price; Apple,$1; Banana,$2
+      - Newline-separated rows with commas
+
+    Uneven rows are padded with empty cells so Manim never crashes.
     """
     text = raw.strip()
     if text.startswith("["):
@@ -68,17 +71,39 @@ def parse_table(raw: str) -> list[list[str]]:
             raise ValueError(f"Could not parse table list literal: {e}") from e
         if not isinstance(rows, list) or not rows:
             raise ValueError("Table list must be a non-empty list of rows")
-        return [[str(c) for c in row] for row in rows]
+        parsed = [[str(c) for c in row] for row in rows]
+    else:
+        chunks = text.split(";") if ";" in text else text.splitlines()
+        parsed = []
+        for line in chunks:
+            line = line.strip()
+            if not line:
+                continue
+            parsed.append([c.strip() for c in line.split(",")])
+        if not parsed:
+            raise ValueError(
+                "Table data is empty. Example: Item,Price; Apple,$1; Banana,$2"
+            )
 
-    rows = []
-    for line in text.split(";"):
-        line = line.strip()
-        if not line:
-            continue
-        rows.append([c.strip() for c in line.split(",")])
-    if not rows:
-        raise ValueError("Table data is empty. Example: Item,Price; Apple,$1; Banana,$2")
-    return rows
+    width = max(len(row) for row in parsed)
+    if width < 1:
+        raise ValueError("Table needs at least one column.")
+    if width > 6:
+        raise ValueError(
+            f"Table has {width} columns — keep it to 6 or fewer so it fits on screen."
+        )
+
+    normalized: list[list[str]] = []
+    for row in parsed:
+        padded = list(row) + [""] * (width - len(row))
+        capped = [(cell[:40] + "…") if len(cell) > 40 else cell for cell in padded]
+        normalized.append(capped)
+
+    if len(normalized) > 8:
+        raise ValueError(
+            f"Table has {len(normalized)} rows — keep it to 8 or fewer for a short clip."
+        )
+    return normalized
 
 
 def parse_timeline(raw: str) -> list[tuple[str, str]]:
@@ -121,7 +146,7 @@ def parse_timeline(raw: str) -> list[tuple[str, str]]:
 
 
 # ---------------------------------------------------------------------------
-# Code emitters
+# Shared scene helpers
 # ---------------------------------------------------------------------------
 
 def _escape(s: str) -> str:
@@ -132,40 +157,79 @@ def _resolve_theme(theme: dict | None) -> dict:
     return merge_theme(theme) if theme else load_theme()
 
 
-def build_title(text: str, theme: dict | None = None) -> str:
-    th = _resolve_theme(theme)
-    t = _escape(text.strip())
-    title_kw = text_kwargs(th, "title_size", "text")
+def _timing(th: dict) -> tuple[float, float]:
+    hold = float(th.get("hold_seconds", 1.2))
+    speed = max(0.5, float(th.get("speed", 1.0)))
+    return hold, speed
+
+
+def _rt(base: float, speed: float) -> float:
+    """Scale a run_time by speed (higher speed → shorter)."""
+    return round(base / speed, 3)
+
+
+def _scene_preamble(th: dict) -> str:
+    """Manim imports, frame aspect, and safe-area fit helper."""
+    if is_portrait(th):
+        fw, fh = 8.0, 14.222
+    else:
+        fw, fh = 14.222, 8.0
     return f'''from manim import *
 
-class GeneratedScene(Scene):
+config.frame_width = {fw}
+config.frame_height = {fh}
+
+def _fit(mob, margin=0.55):
+    """Scale a mobject down so it stays inside the safe area."""
+    max_w = config.frame_width - 2 * margin
+    max_h = config.frame_height - 2 * margin
+    if mob.width > max_w:
+        mob.scale_to_fit_width(max_w)
+    if mob.height > max_h:
+        mob.scale_to_fit_height(max_h)
+    return mob
+
+'''
+
+
+# ---------------------------------------------------------------------------
+# Code emitters
+# ---------------------------------------------------------------------------
+
+def build_title(text: str, theme: dict | None = None) -> str:
+    th = _resolve_theme(theme)
+    hold, speed = _timing(th)
+    t = _escape(text.strip())
+    title_kw = text_kwargs(th, "title_size", "text")
+    return f'''{_scene_preamble(th)}class GeneratedScene(Scene):
     def construct(self):
         self.camera.background_color = "{th["background"]}"
 
         title = Text("{t}", {title_kw}, weight=BOLD)
-        underline = Line(LEFT * 3, RIGHT * 3, color="{th["accent"]}", stroke_width=3)
+        underline = Line(LEFT, RIGHT, color="{th["accent"]}", stroke_width=3)
+        underline.width = min(title.width * 0.9, config.frame_width * 0.55)
         underline.next_to(title, DOWN, buff=0.35)
-        group = VGroup(title, underline).move_to(ORIGIN)
+        group = _fit(VGroup(title, underline).move_to(ORIGIN))
 
-        self.play(FadeIn(title, shift=UP * 0.3), run_time=1.0)
-        self.play(Create(underline), run_time=0.6)
-        self.play(title.animate.set_color("{th["accent"]}"), run_time=0.4)
-        self.wait(1.2)
-        self.play(FadeOut(group), run_time=0.6)
+        self.play(FadeIn(title, shift=UP * 0.3), run_time={_rt(1.0, speed)})
+        self.play(Create(underline), run_time={_rt(0.6, speed)})
+        self.play(title.animate.set_color("{th["accent"]}"), run_time={_rt(0.4, speed)})
+        self.wait({hold})
+        self.play(FadeOut(group), run_time={_rt(0.6, speed)})
 '''
 
 
 def build_chart(data: str, theme: dict | None = None) -> str:
     th = _resolve_theme(theme)
+    hold, speed = _timing(th)
     items = parse_chart_data(data)
     values = [v for _, v in items]
     names = [lab for lab, _ in items]
     heading_kw = text_kwargs(th, "heading_size", "text")
     label_kw = text_kwargs(th, "label_size", "text")
     muted_kw = text_kwargs(th, "label_size", "muted")
-    return f'''from manim import *
-
-class GeneratedScene(Scene):
+    max_height = 5.5 if is_portrait(th) else 4.0
+    return f'''{_scene_preamble(th)}class GeneratedScene(Scene):
     def construct(self):
         self.camera.background_color = "{th["background"]}"
 
@@ -174,16 +238,16 @@ class GeneratedScene(Scene):
         colors = {th["bar_colors"]!r}
         max_val = max(values) or 1
         bar_width = 0.9
-        max_height = 4.0
+        max_height = {max_height}
         gap = 0.55
 
         title = Text("Comparison", {heading_kw})
-        title.to_edge(UP, buff=0.4)
+        title.to_edge(UP, buff=0.45)
 
         n = len(values)
         total_width = n * bar_width + (n - 1) * gap
         x0 = -total_width / 2 + bar_width / 2
-        baseline = -1.5
+        baseline = -config.frame_height * 0.18
 
         bars = VGroup()
         labels = VGroup()
@@ -210,31 +274,33 @@ class GeneratedScene(Scene):
             labels.add(label)
             value_labels.add(vlabel)
 
-        self.play(Write(title), run_time=0.5)
+        chart = _fit(VGroup(bars, labels, value_labels))
+        title = _fit(title)
+
+        self.play(Write(title), run_time={_rt(0.5, speed)})
         self.play(
             LaggedStart(*[GrowFromEdge(bar, DOWN) for bar in bars], lag_ratio=0.2),
-            run_time=1.4,
+            run_time={_rt(1.4, speed)},
         )
         self.play(
             LaggedStart(*[FadeIn(m) for m in (*labels, *value_labels)], lag_ratio=0.05),
-            run_time=0.6,
+            run_time={_rt(0.6, speed)},
         )
-        self.wait(1.2)
-        self.play(FadeOut(VGroup(title, bars, labels, value_labels)), run_time=0.5)
+        self.wait({hold})
+        self.play(FadeOut(VGroup(title, chart)), run_time={_rt(0.5, speed)})
 '''
 
 
 def build_bullets(data: str, theme: dict | None = None) -> str:
     th = _resolve_theme(theme)
+    hold, speed = _timing(th)
     bullets = parse_bullets(data)
     body_kw = text_kwargs(th, "body_size", "text")
     heading_kw = text_kwargs(th, "heading_size", "accent")
     lines = ",\n            ".join(
         f'Text("• {_escape(b)}", {body_kw})' for b in bullets
     )
-    return f'''from manim import *
-
-class GeneratedScene(Scene):
+    return f'''{_scene_preamble(th)}class GeneratedScene(Scene):
     def construct(self):
         self.camera.background_color = "{th["background"]}"
 
@@ -245,26 +311,29 @@ class GeneratedScene(Scene):
             {lines}
         ).arrange(DOWN, aligned_edge=LEFT, buff=0.45)
         items.next_to(title, DOWN, buff=0.7)
+        group = _fit(VGroup(title, items))
 
-        self.play(FadeIn(title), run_time=0.5)
+        self.play(FadeIn(title), run_time={_rt(0.5, speed)})
         for item in items:
-            self.play(FadeIn(item, shift=RIGHT * 0.3), run_time=0.45)
-            self.wait(0.15)
-        self.wait(1.0)
-        self.play(FadeOut(VGroup(title, items)), run_time=0.5)
+            self.play(FadeIn(item, shift=RIGHT * 0.3), run_time={_rt(0.45, speed)})
+            self.wait({_rt(0.15, speed)})
+        self.wait({hold})
+        self.play(FadeOut(group), run_time={_rt(0.5, speed)})
 '''
 
 
 def build_diagram(data: str, theme: dict | None = None) -> str:
     th = _resolve_theme(theme)
+    hold, speed = _timing(th)
     nodes = parse_diagram(data)
     body_kw = text_kwargs(th, "body_size", "text")
     node_lines = ",\n            ".join(
         f'Text("{_escape(n)}", {body_kw})' for n in nodes
     )
-    return f'''from manim import *
-
-class GeneratedScene(Scene):
+    direction = "DOWN" if is_portrait(th) else "RIGHT"
+    start_edge = "get_bottom" if is_portrait(th) else "get_right"
+    end_edge = "get_top" if is_portrait(th) else "get_left"
+    return f'''{_scene_preamble(th)}class GeneratedScene(Scene):
     def construct(self):
         self.camera.background_color = "{th["background"]}"
 
@@ -284,14 +353,15 @@ class GeneratedScene(Scene):
             label.move_to(box.get_center())
             boxes.add(group)
 
-        boxes.arrange(RIGHT, buff=1.1)
+        boxes.arrange({direction}, buff=1.0)
         boxes.move_to(ORIGIN)
+        _fit(boxes)
 
         arrows = VGroup()
         for i in range(len(boxes) - 1):
             arrow = Arrow(
-                boxes[i].get_right(),
-                boxes[i + 1].get_left(),
+                boxes[i].{start_edge}(),
+                boxes[i + 1].{end_edge}(),
                 buff=0.12,
                 color="{th["accent_secondary"]}",
                 stroke_width=3,
@@ -299,21 +369,26 @@ class GeneratedScene(Scene):
             )
             arrows.add(arrow)
 
-        self.play(LaggedStart(*[FadeIn(b, shift=UP * 0.2) for b in boxes], lag_ratio=0.25))
-        self.play(LaggedStart(*[GrowArrow(a) for a in arrows], lag_ratio=0.2))
-        self.wait(1.2)
-        self.play(FadeOut(VGroup(boxes, arrows)), run_time=0.5)
+        self.play(
+            LaggedStart(*[FadeIn(b, shift=UP * 0.2) for b in boxes], lag_ratio=0.25),
+            run_time={_rt(1.2, speed)},
+        )
+        self.play(
+            LaggedStart(*[GrowArrow(a) for a in arrows], lag_ratio=0.2),
+            run_time={_rt(0.9, speed)},
+        )
+        self.wait({hold})
+        self.play(FadeOut(VGroup(boxes, arrows)), run_time={_rt(0.5, speed)})
 '''
 
 
 def build_table(data: str, theme: dict | None = None) -> str:
     th = _resolve_theme(theme)
+    hold, speed = _timing(th)
     rows = parse_table(data)
     heading_kw = text_kwargs(th, "heading_size", "text")
     font_arg = f', "font": "{th["font"]}"' if th.get("font") else ""
-    return f'''from manim import *
-
-class GeneratedScene(Scene):
+    return f'''{_scene_preamble(th)}class GeneratedScene(Scene):
     def construct(self):
         self.camera.background_color = "{th["background"]}"
 
@@ -324,29 +399,30 @@ class GeneratedScene(Scene):
             element_to_mobject=Text,
             element_to_mobject_config={{"font_size": {th["body_size"]}, "color": "{th["text"]}"{font_arg}}},
         )
-        table.scale(0.7)
         title = Text("Overview", {heading_kw})
         title.to_edge(UP, buff=0.4)
         table.next_to(title, DOWN, buff=0.5)
+        group = _fit(VGroup(title, table))
 
-        self.play(Write(title), run_time=0.5)
-        self.play(table.create(), run_time=1.8)
-        self.wait(1.2)
-        self.play(FadeOut(VGroup(title, table)), run_time=0.5)
+        self.play(Write(title), run_time={_rt(0.5, speed)})
+        self.play(table.create(), run_time={_rt(1.8, speed)})
+        self.wait({hold})
+        self.play(FadeOut(group), run_time={_rt(0.5, speed)})
 '''
 
 
 def build_timeline(data: str, theme: dict | None = None) -> str:
     th = _resolve_theme(theme)
+    hold, speed = _timing(th)
     points = parse_timeline(data)
     pairs_repr = repr([(y, lab) for y, lab in points])
     heading_kw = text_kwargs(th, "heading_size", "accent")
     label_kw = text_kwargs(th, "label_size", "text")
     muted_kw = text_kwargs(th, "label_size", "muted")
+    portrait = is_portrait(th)
 
-    return f'''from manim import *
-
-class GeneratedScene(Scene):
+    if portrait:
+        return f'''{_scene_preamble(th)}class GeneratedScene(Scene):
     def construct(self):
         self.camera.background_color = "{th["background"]}"
 
@@ -356,19 +432,65 @@ class GeneratedScene(Scene):
         heading = Text("Timeline", {heading_kw})
         heading.to_edge(UP, buff=0.45)
 
-        line = Line(LEFT * 5.5, RIGHT * 5.5, color="{th["accent_secondary"]}", stroke_width=4)
-        line.shift(UP * 0.2)
+        span = config.frame_height * 0.55
+        y0, y1 = span / 2, -span / 2
+        line = Line([0, y0, 0], [0, y1, 0], color="{th["accent_secondary"]}", stroke_width=4)
 
-        self.play(FadeIn(heading), Create(line), run_time=0.8)
+        self.play(FadeIn(heading), Create(line), run_time={_rt(0.8, speed)})
 
         for i, (year, label) in enumerate(points):
-            x = interpolate(-5.5, 5.5, i / max(n - 1, 1))
+            y = interpolate(y0, y1, i / max(n - 1, 1))
+            dot = Dot(point=[0, y, 0], radius=0.12, color="{th["highlight"]}")
+            tick = Line([-0.15, y, 0], [0.15, y, 0], color="{th["text"]}", stroke_width=2)
+            year_t = Text(str(year), {label_kw})
+            year_t.next_to(dot, LEFT, buff=0.35)
+
+            self.play(
+                FadeIn(VGroup(tick, dot), scale=0.5),
+                FadeIn(year_t),
+                run_time={_rt(0.35, speed)},
+            )
+
+            if label:
+                event = Text(str(label), {muted_kw})
+                event.next_to(dot, RIGHT, buff=0.35)
+                self.play(FadeIn(event, shift=RIGHT * 0.1), run_time={_rt(0.25, speed)})
+
+            self.wait({_rt(0.08, speed)})
+
+        _fit(VGroup(*self.mobjects))
+        self.wait({hold})
+        self.play(*[FadeOut(mob) for mob in self.mobjects], run_time={_rt(0.6, speed)})
+'''
+
+    return f'''{_scene_preamble(th)}class GeneratedScene(Scene):
+    def construct(self):
+        self.camera.background_color = "{th["background"]}"
+
+        points = {pairs_repr}
+        n = len(points)
+
+        heading = Text("Timeline", {heading_kw})
+        heading.to_edge(UP, buff=0.45)
+
+        half = config.frame_width * 0.42
+        line = Line(LEFT * half, RIGHT * half, color="{th["accent_secondary"]}", stroke_width=4)
+        line.shift(UP * 0.2)
+
+        self.play(FadeIn(heading), Create(line), run_time={_rt(0.8, speed)})
+
+        for i, (year, label) in enumerate(points):
+            x = interpolate(-half, half, i / max(n - 1, 1))
             dot = Dot(point=[x, 0.2, 0], radius=0.12, color="{th["highlight"]}")
             tick = Line([x, 0.05, 0], [x, 0.35, 0], color="{th["text"]}", stroke_width=2)
             year_t = Text(str(year), {label_kw})
             year_t.next_to(dot, DOWN, buff=0.35)
 
-            self.play(FadeIn(VGroup(tick, dot), scale=0.5), FadeIn(year_t), run_time=0.35)
+            self.play(
+                FadeIn(VGroup(tick, dot), scale=0.5),
+                FadeIn(year_t),
+                run_time={_rt(0.35, speed)},
+            )
 
             if label:
                 event = Text(str(label), {muted_kw})
@@ -376,12 +498,13 @@ class GeneratedScene(Scene):
                     event.next_to(dot, UP, buff=0.4)
                 else:
                     event.next_to(year_t, DOWN, buff=0.2)
-                self.play(FadeIn(event, shift=UP * 0.1), run_time=0.25)
+                self.play(FadeIn(event, shift=UP * 0.1), run_time={_rt(0.25, speed)})
 
-            self.wait(0.08)
+            self.wait({_rt(0.08, speed)})
 
-        self.wait(1.3)
-        self.play(*[FadeOut(mob) for mob in self.mobjects], run_time=0.6)
+        _fit(VGroup(*self.mobjects))
+        self.wait({hold})
+        self.play(*[FadeOut(mob) for mob in self.mobjects], run_time={_rt(0.6, speed)})
 '''
 
 
@@ -452,5 +575,24 @@ def detect_section(description: str) -> tuple[str, str] | None:
         after = re.split(r"(?i)(?:bullets?|key points)[:\s]+", text, maxsplit=1)
         if len(after) == 2 and after[1].strip():
             return "bullets", after[1].strip()
+
+    if "table" in lower:
+        after = re.split(r"(?i)table[:\s]+", text, maxsplit=1)
+        if len(after) == 2 and after[1].strip():
+            return "table", after[1].strip()
+
+    instructiony = re.search(
+        r"(?i)\b(make|create|animate|generate|render|with|using|show|add|bigger|smaller|full.?screen|particle|spiral|morph)\b",
+        text,
+    )
+    if (
+        len(text) <= 48
+        and not instructiony
+        and ":" not in text
+        and "->" not in text
+        and ";" not in text
+        and "," not in text
+    ):
+        return "title", text.strip().strip("\"'")
 
     return None

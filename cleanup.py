@@ -65,6 +65,55 @@ def export_video(
     return dest
 
 
+def concat_videos(sources: list[Path], slug: str = "sequence") -> Path:
+    """
+    Concatenate MP4s with ffmpeg into a single exports/ file.
+    Re-encodes for safety when clips share resolution but differ slightly.
+    """
+    import subprocess
+    import tempfile
+
+    if not sources:
+        raise ValueError("No videos to concatenate.")
+    for src in sources:
+        if not src.is_file():
+            raise FileNotFoundError(f"Missing clip for sequence: {src}")
+
+    ensure_exports_dir()
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = EXPORTS_DIR / f"{stamp}-{_slugify(slug)}.mp4"
+
+    with tempfile.TemporaryDirectory(prefix="clipforge-seq-") as tmp:
+        list_path = Path(tmp) / "concat.txt"
+        # ffmpeg concat demuxer needs absolute paths, single-quoted
+        lines = []
+        for src in sources:
+            escaped = str(src.resolve()).replace("'", "'\\''")
+            lines.append(f"file '{escaped}'")
+        list_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-f", "concat",
+            "-safe", "0",
+            "-i", str(list_path),
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-an",
+            str(dest),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            err = (result.stderr or result.stdout or "").strip().splitlines()
+            tail = err[-3:] if err else ["unknown ffmpeg error"]
+            raise RuntimeError("ffmpeg concat failed: " + " | ".join(tail))
+
+    if not dest.is_file():
+        raise RuntimeError("Sequence concat finished but output file is missing.")
+    return dest
+
+
 def list_exports(limit: int = 30) -> list[dict]:
     ensure_exports_dir()
     files = sorted(EXPORTS_DIR.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
