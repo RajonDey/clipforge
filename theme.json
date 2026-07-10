@@ -1,0 +1,22 @@
+{
+  "preset": "dark_teal",
+  "background": "#ffffff",
+  "surface": "#152033",
+  "accent": "#5eead4",
+  "accent_secondary": "#60a5fa",
+  "text": "#000000",
+  "muted": "#9ca3af",
+  "highlight": "#fbbf24",
+  "font": "",
+  "title_size": 56,
+  "heading_size": 40,
+  "body_size": 28,
+  "label_size": 24,
+  "bar_colors": [
+    "#5EEAD4",
+    "#60A5FA",
+    "#FBBF24",
+    "#C084FC",
+    "#4ADE80"
+  ]
+}

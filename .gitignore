@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Manim temp render cache
+media/
+
+# Generated scene (rewritten each render)
+generated_scene.py
+
+# Local exports (keep folder via .gitkeep)
+exports/*
+!exports/.gitkeep

@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Clipforge — animated video clips</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #14212b;
+      --ink-soft: #3d4f5c;
+      --muted: #6b7c88;
+      --paper: #e8eef3;
+      --paper-2: #f4f7fa;
+      --line: rgba(20, 33, 43, 0.12);
+      --accent: #0f766e;
+      --accent-deep: #0b5a54;
+      --accent-wash: rgba(15, 118, 110, 0.12);
+      --danger: #b42318;
+      --stage: #0b0f19;
+      --radius: 14px;
+      --font-display: "Syne", sans-serif;
+      --font-body: "Figtree", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      color: var(--ink);
+      font-family: var(--font-body);
+      background:
+        radial-gradient(1200px 600px at 12% -10%, rgba(15, 118, 110, 0.18), transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, rgba(37, 99, 235, 0.10), transparent 50%),
+        linear-gradient(165deg, #dfe8ef 0%, var(--paper) 42%, #f7fafc 100%);
+      background-attachment: fixed;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.35;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.45'/%3E%3C/svg%3E");
+      mix-blend-mode: multiply;
+      z-index: 0;
+    }
+
+    .wrap {
+      position: relative;
+      z-index: 1;
+      width: min(1120px, calc(100% - 2.5rem));
+      margin: 0 auto;
+      padding: 2.5rem 0 4rem;
+    }
+
+    header {
+      margin-bottom: 1.75rem;
+      animation: rise 0.7s ease both;
+    }
+
+    .brand {
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: clamp(2.6rem, 6vw, 3.6rem);
+      letter-spacing: -0.04em;
+      line-height: 0.95;
+      margin: 0;
+    }
+
+    .brand span { color: var(--accent); }
+
+    .lede {
+      margin: 0.85rem 0 0;
+      max-width: 32rem;
+      color: var(--ink-soft);
+      font-size: 1.05rem;
+      line-height: 1.45;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 1.25rem;
+      align-items: start;
+      animation: rise 0.8s 0.08s ease both;
+    }
+
+    @media (max-width: 900px) {
+      .workspace { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: color-mix(in srgb, var(--paper-2) 88%, white);
+      border: 1px solid var(--line);
+      border-radius: calc(var(--radius) + 4px);
+      padding: 1.2rem 1.2rem 1.3rem;
+      backdrop-filter: blur(8px);
+    }
+
+    .label {
+      display: block;
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 0.5rem;
+    }
+
+    .types {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-bottom: 1rem;
+    }
+
+    .type-btn, .ghost, .render, .save-theme {
+      appearance: none;
+      font: inherit;
+      cursor: pointer;
+      transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+    }
+
+    .type-btn {
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--ink-soft);
+      font-weight: 600;
+      font-size: 0.92rem;
+      padding: 0.45rem 0.8rem;
+      border-radius: 999px;
+    }
+
+    .type-btn:hover {
+      border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+      color: var(--ink);
+    }
+
+    .type-btn[aria-pressed="true"] {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+    }
+
+    .type-btn:active, .render:active, .ghost:active, .save-theme:active {
+      transform: scale(0.98);
+    }
+
+    .hint {
+      min-height: 1.35rem;
+      margin: -0.25rem 0 0.85rem;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    textarea, select, input[type="text"], input[type="number"] {
+      width: 100%;
+      font: inherit;
+      color: var(--ink);
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 0.8rem 0.9rem;
+      outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    textarea {
+      min-height: 7.5rem;
+      resize: vertical;
+      line-height: 1.45;
+    }
+
+    textarea:focus, select:focus, input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-wash);
+    }
+
+    .row {
+      display: flex;
+      gap: 0.75rem;
+      align-items: end;
+      margin-top: 0.9rem;
+      flex-wrap: wrap;
+    }
+
+    .field { flex: 1; min-width: 120px; }
+
+    .render, .save-theme {
+      border: 0;
+      background: var(--ink);
+      color: white;
+      font-weight: 700;
+      font-size: 1rem;
+      padding: 0.85rem 1.2rem;
+      border-radius: 12px;
+      white-space: nowrap;
+    }
+
+    .render:hover, .save-theme:hover { background: var(--accent-deep); }
+    .render:disabled, .save-theme:disabled { opacity: 0.55; cursor: wait; }
+
+    .ghost {
+      border: 1px solid var(--line);
+      background: white;
+      color: var(--ink-soft);
+      font-weight: 600;
+      font-size: 0.88rem;
+      padding: 0.55rem 0.85rem;
+      border-radius: 10px;
+    }
+
+    .ghost:hover { color: var(--ink); border-color: var(--accent); }
+
+    .status {
+      margin-top: 0.85rem;
+      min-height: 1.4rem;
+      font-size: 0.92rem;
+      color: var(--ink-soft);
+    }
+
+    .status.error { color: var(--danger); }
+    .status.busy::before {
+      content: "";
+      display: inline-block;
+      width: 0.55rem;
+      height: 0.55rem;
+      margin-right: 0.45rem;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 1s ease infinite;
+      vertical-align: middle;
+    }
+
+    details.theme {
+      margin-top: 1.1rem;
+      border-top: 1px solid var(--line);
+      padding-top: 0.9rem;
+    }
+
+    details.theme > summary {
+      cursor: pointer;
+      font-weight: 700;
+      color: var(--ink);
+      list-style: none;
+    }
+
+    details.theme > summary::-webkit-details-marker { display: none; }
+    details.theme > summary::after {
+      content: "Edit";
+      float: right;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .theme-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.65rem;
+      margin-top: 0.9rem;
+    }
+
+    @media (max-width: 600px) {
+      .theme-grid { grid-template-columns: 1fr 1fr; }
+    }
+
+    .swatch label {
+      display: block;
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.3rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .swatch input[type="color"] {
+      width: 100%;
+      height: 2.4rem;
+      padding: 0.2rem;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: white;
+      cursor: pointer;
+    }
+
+    .theme-actions {
+      display: flex;
+      gap: 0.6rem;
+      margin-top: 0.85rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .stage-panel {
+      padding: 0;
+      overflow: hidden;
+      background: var(--stage);
+      border-color: rgba(255,255,255,0.06);
+      min-height: 320px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .stage-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.85rem 1rem;
+      color: rgba(255,255,255,0.55);
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .stage-head a {
+      color: #5eead4;
+      text-decoration: none;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+
+    .stage-head a.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .stage {
+      flex: 1;
+      display: grid;
+      place-items: center;
+      padding: 1rem;
+      min-height: 260px;
+    }
+
+    .placeholder {
+      text-align: center;
+      color: rgba(255,255,255,0.38);
+      font-size: 0.95rem;
+      max-width: 16rem;
+      line-height: 1.4;
+    }
+
+    video {
+      width: 100%;
+      max-height: 380px;
+      border-radius: 8px;
+      background: #000;
+      display: none;
+    }
+
+    video.show { display: block; }
+
+    .side-stack { display: grid; gap: 1.25rem; }
+
+    .exports {
+      max-height: 220px;
+      overflow: auto;
+    }
+
+    .exports ul {
+      list-style: none;
+      margin: 0.4rem 0 0;
+      padding: 0;
+    }
+
+    .exports li {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 0.55rem 0;
+      border-bottom: 1px solid var(--line);
+      font-size: 0.88rem;
+    }
+
+    .exports li:last-child { border-bottom: 0; }
+
+    .exports a {
+      color: var(--accent-deep);
+      text-decoration: none;
+      font-weight: 600;
+      word-break: break-all;
+    }
+
+    .exports a:hover { text-decoration: underline; }
+
+    .meta {
+      color: var(--muted);
+      font-size: 0.8rem;
+      white-space: nowrap;
+    }
+
+    .disk {
+      margin-top: 0.65rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.35; transform: scale(0.9); }
+      50% { opacity: 1; transform: scale(1); }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1 class="brand">Clipforge<span>.</span></h1>
+      <p class="lede">Pick a clip type, tune the look, render. Exports are kept; Manim caches are cleared after each run.</p>
+    </header>
+
+    <div class="workspace">
+      <section class="panel" aria-label="Compose">
+        <span class="label">Section type</span>
+        <div class="types" role="group" aria-label="Section types">
+          {% for t in types %}
+          <button
+            type="button"
+            class="type-btn"
+            data-type="{{ t.id }}"
+            data-hint="{{ t.hint }}"
+            data-placeholder="{{ t.placeholder }}"
+            data-field="{{ t.field }}"
+            aria-pressed="{{ 'true' if loop.first else 'false' }}"
+          >{{ t.label }}</button>
+          {% endfor %}
+        </div>
+
+        <p class="hint" id="hint">{{ types[0].hint if types else '' }}</p>
+
+        <label class="label" for="content" id="field-label">{{ types[0].field if types else 'Content' }}</label>
+        <textarea id="content" placeholder="{{ types[0].placeholder if types else '' }}"></textarea>
+
+        <div class="row">
+          <div class="field">
+            <label class="label" for="quality">Quality</label>
+            <select id="quality">
+              <option value="l" selected>Draft · 480p</option>
+              <option value="m">Good · 720p</option>
+              <option value="h">High · 1080p</option>
+              <option value="k">Ultra · 4K</option>
+            </select>
+          </div>
+          <button type="button" class="render" id="render">Render clip</button>
+        </div>
+
+        <p class="status" id="status" role="status" aria-live="polite"></p>
+
+        <details class="theme">
+          <summary>Look &amp; theme</summary>
+          <div class="row" style="margin-top:0.85rem">
+            <div class="field">
+              <label class="label" for="preset">Preset</label>
+              <select id="preset">
+                {% for p in presets %}
+                <option value="{{ p }}" {% if theme.preset == p %}selected{% endif %}>{{ p.replace('_', ' ') }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="field">
+              <label class="label" for="font">Font family</label>
+              <input id="font" type="text" value="{{ theme.font }}" placeholder="System default (or Montserrat, Arial…)" />
+            </div>
+          </div>
+
+          <div class="theme-grid">
+            <div class="swatch">
+              <label for="c-bg">Background</label>
+              <input id="c-bg" type="color" value="{{ theme.background }}" />
+            </div>
+            <div class="swatch">
+              <label for="c-accent">Accent</label>
+              <input id="c-accent" type="color" value="{{ theme.accent }}" />
+            </div>
+            <div class="swatch">
+              <label for="c-secondary">Secondary</label>
+              <input id="c-secondary" type="color" value="{{ theme.accent_secondary }}" />
+            </div>
+            <div class="swatch">
+              <label for="c-text">Text</label>
+              <input id="c-text" type="color" value="{{ theme.text }}" />
+            </div>
+            <div class="swatch">
+              <label for="c-muted">Muted</label>
+              <input id="c-muted" type="color" value="{{ theme.muted }}" />
+            </div>
+            <div class="swatch">
+              <label for="c-highlight">Highlight</label>
+              <input id="c-highlight" type="color" value="{{ theme.highlight }}" />
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label class="label" for="title-size">Title size</label>
+              <input id="title-size" type="number" min="24" max="96" value="{{ theme.title_size }}" />
+            </div>
+            <div class="field">
+              <label class="label" for="heading-size">Heading size</label>
+              <input id="heading-size" type="number" min="18" max="72" value="{{ theme.heading_size }}" />
+            </div>
+            <div class="field">
+              <label class="label" for="body-size">Body size</label>
+              <input id="body-size" type="number" min="14" max="48" value="{{ theme.body_size }}" />
+            </div>
+          </div>
+
+          <div class="theme-actions">
+            <button type="button" class="save-theme" id="save-theme">Save theme</button>
+            <span class="meta" id="theme-status">Saved to theme.json</span>
+          </div>
+        </details>
+      </section>
+
+      <div class="side-stack">
+        <section class="panel stage-panel" aria-label="Preview">
+          <div class="stage-head">
+            <span>Preview</span>
+            <a id="download" href="#" download>Download MP4</a>
+          </div>
+          <div class="stage">
+            <p class="placeholder" id="empty">Your rendered clip will appear here.</p>
+            <video id="player" controls playsinline></video>
+          </div>
+        </section>
+
+        <section class="panel" aria-label="Exports">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem">
+            <span class="label" style="margin:0">Exports library</span>
+            <button type="button" class="ghost" id="cleanup">Clear media cache</button>
+          </div>
+          <p class="disk">Media cache: <strong id="media-mb">{{ media_mb }}</strong> MB · lasting clips live in <code>exports/</code></p>
+          <div class="exports">
+            <ul id="exports-list">
+              {% for e in exports %}
+              <li>
+                <a href="{{ e.url }}" data-play="{{ e.url }}">{{ e.name }}</a>
+                <span class="meta">{{ e.size_kb }} KB</span>
+              </li>
+              {% else %}
+              <li><span class="meta">No exports yet — render a clip.</span></li>
+              {% endfor %}
+            </ul>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const types = Array.from(document.querySelectorAll(".type-btn"));
+    const hint = document.getElementById("hint");
+    const fieldLabel = document.getElementById("field-label");
+    const content = document.getElementById("content");
+    const quality = document.getElementById("quality");
+    const renderBtn = document.getElementById("render");
+    const status = document.getElementById("status");
+    const player = document.getElementById("player");
+    const empty = document.getElementById("empty");
+    const download = document.getElementById("download");
+    const exportsList = document.getElementById("exports-list");
+    const mediaMb = document.getElementById("media-mb");
+    const themeStatus = document.getElementById("theme-status");
+
+    let currentType = types[0]?.dataset.type || "title";
+
+    function selectType(btn) {
+      types.forEach((b) => b.setAttribute("aria-pressed", "false"));
+      btn.setAttribute("aria-pressed", "true");
+      currentType = btn.dataset.type;
+      hint.textContent = btn.dataset.hint;
+      fieldLabel.textContent = btn.dataset.field;
+      content.placeholder = btn.dataset.placeholder;
+    }
+
+    types.forEach((btn) => btn.addEventListener("click", () => selectType(btn)));
+
+    function readThemeFromForm() {
+      return {
+        preset: document.getElementById("preset").value,
+        background: document.getElementById("c-bg").value,
+        accent: document.getElementById("c-accent").value,
+        accent_secondary: document.getElementById("c-secondary").value,
+        text: document.getElementById("c-text").value,
+        muted: document.getElementById("c-muted").value,
+        highlight: document.getElementById("c-highlight").value,
+        font: document.getElementById("font").value.trim(),
+        title_size: Number(document.getElementById("title-size").value),
+        heading_size: Number(document.getElementById("heading-size").value),
+        body_size: Number(document.getElementById("body-size").value),
+      };
+    }
+
+    function applyThemeToForm(theme) {
+      if (!theme) return;
+      if (theme.preset) document.getElementById("preset").value = theme.preset;
+      document.getElementById("c-bg").value = theme.background;
+      document.getElementById("c-accent").value = theme.accent;
+      document.getElementById("c-secondary").value = theme.accent_secondary;
+      document.getElementById("c-text").value = theme.text;
+      document.getElementById("c-muted").value = theme.muted;
+      document.getElementById("c-highlight").value = theme.highlight;
+      document.getElementById("font").value = theme.font || "";
+      document.getElementById("title-size").value = theme.title_size;
+      document.getElementById("heading-size").value = theme.heading_size;
+      document.getElementById("body-size").value = theme.body_size;
+    }
+
+    async function saveTheme(usePreset = false) {
+      const payload = readThemeFromForm();
+      if (usePreset) {
+        // Load full preset colors from server
+        const res = await fetch("/api/theme", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ preset: payload.preset }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || "Could not apply preset");
+        applyThemeToForm(data.theme);
+        themeStatus.textContent = `Preset “${data.theme.preset}” applied`;
+        return data.theme;
+      }
+
+      const res = await fetch("/api/theme", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...payload, colors_only: true }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Could not save theme");
+      themeStatus.textContent = "Theme saved";
+      return data.theme;
+    }
+
+    document.getElementById("preset").addEventListener("change", async () => {
+      try {
+        await saveTheme(true);
+      } catch (err) {
+        themeStatus.textContent = err.message;
+      }
+    });
+
+    document.getElementById("save-theme").addEventListener("click", async () => {
+      try {
+        await saveTheme(false);
+      } catch (err) {
+        themeStatus.textContent = err.message;
+      }
+    });
+
+    function showVideo(url, downloadName) {
+      player.src = url;
+      player.classList.add("show");
+      empty.style.display = "none";
+      download.href = url;
+      download.setAttribute("download", downloadName || "section.mp4");
+      download.classList.add("show");
+      player.load();
+      player.play().catch(() => {});
+    }
+
+    function renderExports(items) {
+      if (!items || !items.length) {
+        exportsList.innerHTML = '<li><span class="meta">No exports yet — render a clip.</span></li>';
+        return;
+      }
+      exportsList.innerHTML = items.map((e) => `
+        <li>
+          <a href="${e.url}" data-play="${e.url}">${e.name}</a>
+          <span class="meta">${e.size_kb} KB</span>
+        </li>
+      `).join("");
+    }
+
+    exportsList.addEventListener("click", (e) => {
+      const a = e.target.closest("a[data-play]");
+      if (!a) return;
+      e.preventDefault();
+      showVideo(a.dataset.play, a.textContent.trim());
+    });
+
+    async function renderClip() {
+      const payload = content.value.trim();
+      if (!payload) {
+        status.className = "status error";
+        status.textContent = "Add some content first.";
+        content.focus();
+        return;
+      }
+
+      renderBtn.disabled = true;
+      status.className = "status busy";
+      status.textContent = "Rendering… then exporting & cleaning caches.";
+
+      try {
+        // Persist current theme colors before render
+        await saveTheme(false);
+
+        const res = await fetch("/api/render", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: currentType,
+            content: payload,
+            quality: quality.value,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || "Render failed");
+
+        showVideo(data.video_url, data.export_name);
+        renderExports(data.exports);
+        mediaMb.textContent = data.media_mb;
+
+        status.className = "status";
+        status.textContent = `Ready in ${data.seconds}s · saved ${data.export_name}`;
+      } catch (err) {
+        status.className = "status error";
+        status.textContent = err.message || String(err);
+      } finally {
+        renderBtn.disabled = false;
+      }
+    }
+
+    renderBtn.addEventListener("click", renderClip);
+    content.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        renderClip();
+      }
+    });
+
+    document.getElementById("cleanup").addEventListener("click", async () => {
+      const res = await fetch("/api/cleanup", { method: "POST" });
+      const data = await res.json();
+      if (data.ok) {
+        mediaMb.textContent = data.media_mb;
+        status.className = "status";
+        status.textContent = "Media cache cleared. Exports kept.";
+      }
+    });
+  </script>
+</body>
+</html>
